@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"github.com/go-ego/riot"
 	"github.com/go-ego/riot/types"
@@ -25,7 +26,7 @@ const (
 
 var (
 	searcher      = riot.Engine{}
-	wbs           = map[uint64]Weibo{}
+	wbs           = map[string]Weibo{}
 	weiboData     = flag.String("weibo_data", "weibo.txt", "微博数据文件")
 	dictFile      = flag.String("dict_file", "../../data/dict/dictionary.txt", "词典文件")
 	stopTokenFile = flag.String("stop_token_file", "../../data/dict/stop_tokens.txt", "停用词文件")
@@ -34,7 +35,8 @@ var (
 
 // Weibo weibo json struct
 type Weibo struct {
-	Id           uint64 `json:"id"`
+	// Id           uint64 `json:"id"`
+	Id           string `json:"id"`
 	Timestamp    uint64 `json:"timestamp"`
 	UserName     string `json:"user_name"`
 	RepostsCount uint64 `json:"reposts_count"`
@@ -55,7 +57,7 @@ func indexWeibo() {
 
 	var (
 		tokenDatas []types.TokenData
-		index      uint64
+		index      int
 		tokens     []string
 	)
 
@@ -81,9 +83,9 @@ func indexWeibo() {
 		index1 := types.DocData{Tokens: tokenDatas, Fields: string(buf)}
 		index2 := types.DocData{Content: string(buf), Tokens: tokenDatas}
 
-		searcher.Index(index, index1)
+		searcher.Index(strconv.Itoa(index), index1)
 		index++
-		searcher.Index(index, index2)
+		searcher.Index(strconv.Itoa(index), index2)
 		index++
 	}
 
@@ -158,8 +160,8 @@ func main() {
 		// StoreFolder: "weibo_search",
 		// StoreEngine: "bg",
 	})
-	log.Print("searcher init end")
-	wbs = make(map[uint64]Weibo)
+	log.Println("searcher init end")
+	wbs = make(map[string]Weibo)
 
 	// 索引
 	go indexWeibo()
@@ -169,7 +171,7 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for range c {
-			log.Print("捕获Ctrl-c，退出服务器")
+			log.Println("捕获Ctrl-c，退出服务器")
 			searcher.Close()
 			os.Exit(0)
 		}
@@ -177,6 +179,6 @@ func main() {
 
 	http.HandleFunc("/json", JsonRpcServer)
 	http.Handle("/", http.FileServer(http.Dir(*staticFolder)))
-	log.Print("服务器启动")
+	log.Println("服务器启动")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

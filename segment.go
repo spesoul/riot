@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/go-ego/gpy"
+	"github.com/go-ego/gpy/phrase"
 	"github.com/go-ego/riot/types"
 )
 
@@ -28,7 +29,7 @@ import (
 type TMap map[string][]int
 
 type segmenterReq struct {
-	docId uint64
+	docId string
 	hash  uint32
 	data  types.DocData
 	// data        types.DocumentIndexData
@@ -167,9 +168,11 @@ func (engine *Engine) segmenterData(request segmenterReq) (TMap, int) {
 		return tokensMap, numTokens
 	}
 
-	if engine.initOptions.Using == 2 ||
-		((engine.initOptions.Using == 1 || engine.initOptions.Using == 3) &&
-			request.data.Content == "") {
+	useOpts := engine.initOptions.Using == 1 || engine.initOptions.Using == 3
+	contentNil := request.data.Content == ""
+	opts := useOpts && contentNil
+
+	if engine.initOptions.Using == 2 || opts {
 		for _, t := range request.data.Tokens {
 			if !engine.stopTokens.IsStopToken(t.Text) {
 				tokensMap[t.Text] = t.Locations
@@ -191,9 +194,6 @@ func (engine *Engine) defaultTokens(content string) (tokensMap TMap, numTokens i
 	tokensMap = make(map[string][]int)
 	strData := strings.Split(content, " ")
 	num := len(strData)
-	// if num == 1 {
-	// 	tokensMap[request.data.Content] = []int{1}
-	// }
 
 	if num > 0 {
 		tokenMap, numToken := engine.ForSplitData(strData, num)
@@ -207,10 +207,48 @@ func (engine *Engine) defaultTokens(content string) (tokensMap TMap, numTokens i
 	return
 }
 
+func (engine *Engine) makeTokensMap(request segmenterReq) (map[string][]int, int) {
+	tokensMap := make(map[string][]int)
+	numTokens := 0
+
+	if !(engine.initOptions.NotUseGse && engine.initOptions.Using == 0) {
+		tokensMap, numTokens = engine.segmenterData(request)
+	} else {
+		if request.data.Content != "" {
+			content := strings.ToLower(request.data.Content)
+			tokensMap, numTokens = engine.defaultTokens(content)
+		}
+
+		for _, t := range request.data.Tokens {
+			if !engine.stopTokens.IsStopToken(t.Text) {
+				tokensMap[t.Text] = t.Locations
+			}
+		}
+
+		numTokens += len(request.data.Tokens)
+	}
+
+	if engine.initOptions.PinYin {
+		strArr := engine.PinYin(request.data.Content)
+		count := len(strArr)
+
+		for i := 0; i < count; i++ {
+			str := strArr[i]
+			if !engine.stopTokens.IsStopToken(str) {
+				tokensMap[str] = []int{i}
+			}
+		}
+
+		numTokens += count
+	}
+
+	return tokensMap, numTokens
+}
+
 func (engine *Engine) segmenterWorker() {
 	for {
 		request := <-engine.segmenterChan
-		if request.docId == 0 {
+		if request.docId == "0" {
 			if request.forceUpdate {
 				for i := 0; i < engine.initOptions.NumShards; i++ {
 					engine.indexerAddDocChans[i] <- indexerAddDocReq{
@@ -221,24 +259,7 @@ func (engine *Engine) segmenterWorker() {
 		}
 
 		shard := engine.getShard(request.hash)
-		tokensMap := make(map[string][]int)
-		numTokens := 0
-		if !(engine.initOptions.NotUseGse && engine.initOptions.Using == 0) {
-			tokensMap, numTokens = engine.segmenterData(request)
-		} else {
-			if request.data.Content != "" {
-				content := strings.ToLower(request.data.Content)
-				tokensMap, numTokens = engine.defaultTokens(content)
-			}
-
-			for _, t := range request.data.Tokens {
-				if !engine.stopTokens.IsStopToken(t.Text) {
-					tokensMap[t.Text] = t.Locations
-				}
-			}
-
-			numTokens += len(request.data.Tokens)
-		}
+		tokensMap, numTokens := engine.makeTokensMap(request)
 
 		// 加入非分词的文档标签
 		for _, label := range request.data.Labels {
@@ -294,6 +315,14 @@ func (engine *Engine) segmenterWorker() {
 
 // PinYin get the Chinese alphabet and abbreviation
 func (engine *Engine) PinYin(hans string) []string {
+	if engine.initOptions.UsePhrase {
+		if !engine.initOptions.NotUseGse {
+			phrase.WithGse(engine.segmenter)
+		}
+
+		return phrase.Pinyin(hans)
+	}
+
 	var (
 		str      string
 		pyStr    string

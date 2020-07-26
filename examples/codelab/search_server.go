@@ -3,17 +3,18 @@ package main
 
 import (
 	"bufio"
-	"encoding/gob"
-	"encoding/json"
 	"flag"
 	"io"
 	"log"
-	"net/http"
 	"os"
-	"os/signal"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"encoding/gob"
+	"encoding/json"
+	"net/http"
+	"os/signal"
 
 	"github.com/go-ego/riot"
 	"github.com/go-ego/riot/types"
@@ -27,17 +28,23 @@ const (
 )
 
 var (
-	searcher      = riot.Engine{}
-	wbs           = map[uint64]Weibo{}
-	weiboData     = flag.String("weibo_data", "../../testdata/weibo_data.txt", "微博数据文件")
-	dictFile      = flag.String("dict_file", "../../data/dict/dictionary.txt", "词典文件")
-	stopTokenFile = flag.String("stop_token_file", "../../data/dict/stop_tokens.txt", "停用词文件")
-	staticFolder  = flag.String("static_folder", "static", "静态文件目录")
+	searcher = riot.Engine{}
+	wbs      = map[string]Weibo{}
+
+	weiboData = flag.String("weibo_data",
+		"../../testdata/weibo_data.txt", "微博数据文件")
+	dictFile = flag.String("dict_file",
+		"../../data/dict/dictionary.txt", "词典文件")
+	stopTokenFile = flag.String("stop_token_file",
+		"../../data/dict/stop_tokens.txt", "停用词文件")
+
+	staticFolder = flag.String("static_folder", "static", "静态文件目录")
 )
 
 // Weibo weibo json struct
 type Weibo struct {
-	Id           uint64 `json:"id"`
+	// Id           uint64 `json:"id"`
+	Id           string `json:"id"`
 	Timestamp    uint64 `json:"timestamp"`
 	UserName     string `json:"user_name"`
 	RepostsCount uint64 `json:"reposts_count"`
@@ -54,14 +61,17 @@ func indexWeibo() {
 		log.Fatal(err)
 	}
 	defer file.Close()
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		data := strings.Split(scanner.Text(), "||||")
 		if len(data) != 10 {
 			continue
 		}
+
 		wb := Weibo{}
-		wb.Id, _ = strconv.ParseUint(data[0], 10, 64)
+		// wb.Id, _ = strconv.ParseUint(data[0], 10, 64)
+		wb.Id = data[0]
 		wb.Timestamp, _ = strconv.ParseUint(data[1], 10, 64)
 		wb.UserName = data[3]
 		wb.RepostsCount, _ = strconv.ParseUint(data[4], 10, 64)
@@ -128,7 +138,7 @@ type JsonResponse struct {
 // JsonRpcServer json rpc server
 func JsonRpcServer(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query().Get("query")
-	output := searcher.Search(types.SearchReq{
+	output := searcher.SearchDoc(types.SearchReq{
 		Text: query,
 		RankOpts: &types.RankOpts{
 			ScoringCriteria: &WeiboScoringCriteria{},
@@ -139,7 +149,7 @@ func JsonRpcServer(w http.ResponseWriter, req *http.Request) {
 
 	// 整理为输出格式
 	docs := []*Weibo{}
-	for _, doc := range output.Docs.(types.ScoredDocs) {
+	for _, doc := range output.Docs {
 		wb := wbs[doc.DocId]
 		wb.Text = doc.Content
 		// for _, t := range output.Tokens {
@@ -174,25 +184,25 @@ func main() {
 		},
 		// 如果你希望使用持久存储，启用下面的选项
 		// 默认使用leveldb持久化，如果你希望修改数据库类型
-		// 请用 StoreEngine:"" 或者修改 Riot_Store_Engine 环境变量
+		// 请用 StoreEngine: " " 或者修改 Riot_Store_Engine 环境变量
 		// UseStore: true,
 		// StoreFolder: "weibo_search",
 		// StoreEngine: "bg",
 	})
-	log.Print("引擎初始化完毕")
-	wbs = make(map[uint64]Weibo)
+	log.Println("引擎初始化完毕")
+	wbs = make(map[string]Weibo)
 
 	// 索引
-	log.Print("建索引开始")
+	log.Println("建索引开始")
 	go indexWeibo()
-	log.Print("建索引完毕")
+	log.Println("建索引完毕")
 
 	// 捕获 ctrl-c
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for range c {
-			log.Print("捕获Ctrl-c，退出服务器")
+			log.Println("捕获Ctrl-c，退出服务器")
 			searcher.Close()
 			os.Exit(0)
 		}
@@ -200,6 +210,6 @@ func main() {
 
 	http.HandleFunc("/json", JsonRpcServer)
 	http.Handle("/", http.FileServer(http.Dir(*staticFolder)))
-	log.Print("服务器启动")
+	log.Println("服务器启动")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

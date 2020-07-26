@@ -20,7 +20,7 @@ import (
 )
 
 type rankerAddDocReq struct {
-	docId  uint64
+	docId  string
 	fields interface{}
 	// new
 	content string
@@ -42,24 +42,22 @@ type rankerReturnReq struct {
 }
 
 type rankerRemoveDocReq struct {
-	docId uint64
+	docId string
 }
 
-func (engine *Engine) rankerAddDocWorker(shard int) {
+func (engine *Engine) rankerAddDoc(shard int) {
 	for {
 		request := <-engine.rankerAddDocChans[shard]
 		if engine.initOptions.IDOnly {
 			engine.rankers[shard].AddDoc(request.docId, request.fields)
-			return
+		} else {
+			engine.rankers[shard].AddDoc(request.docId, request.fields,
+				request.content, request.attri)
 		}
-		// } else {
-		engine.rankers[shard].AddDoc(request.docId, request.fields,
-			request.content, request.attri)
-		// }
 	}
 }
 
-func (engine *Engine) rankerRankWorker(shard int) {
+func (engine *Engine) rankerRank(shard int) {
 	for {
 		request := <-engine.rankerRankChans[shard]
 		if request.options.MaxOutputs != 0 {
@@ -74,7 +72,7 @@ func (engine *Engine) rankerRankWorker(shard int) {
 	}
 }
 
-func (engine *Engine) rankerRemoveDocWorker(shard int) {
+func (engine *Engine) rankerRemoveDoc(shard int) {
 	for {
 		request := <-engine.rankerRemoveDocChans[shard]
 		engine.rankers[shard].RemoveDoc(request.docId)
